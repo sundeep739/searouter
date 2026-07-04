@@ -1,0 +1,21 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/weather/cache/
+
+# Node
+web/node_modules/
+web/dist/
+web/dev-dist/
+
+# Env & secrets
+.env
+web/.env
+!.env.example
+!web/.env.example
+
+# OS
+.DS_Store
+Thumbs.db
