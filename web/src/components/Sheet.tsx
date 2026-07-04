@@ -1,13 +1,41 @@
-import { useRef, useState } from 'react'
+import { createContext, useContext, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useIsMobile } from '../lib/useMedia'
 
-/** Desktop: fixed left panel. Mobile: draggable bottom sheet over the map
- *  with three snap heights. */
+const SheetCtx = createContext<{ raise: () => void; collapse: () => void } | null>(null)
+/** Lets sheet content nudge the sheet open/closed (mobile only; null on desktop). */
+export const useSheet = () => useContext(SheetCtx)
+
+/** Desktop: fixed left panel. Mobile: draggable bottom sheet over the map,
+ *  defaulting to a low "peek" so the map stays the hero. Renders children once
+ *  (switches on viewport) so views don't double-mount. */
 export default function Sheet({ children, mapless }: { children: ReactNode; mapless?: boolean }) {
-  const SNAPS = [0.28, 0.55, 0.88]
-  const [snap, setSnap] = useState(1)
+  const isMobile = useIsMobile()
+  const SNAPS = [0.26, 0.6, 0.92]
+  const [snap, setSnap] = useState(0)
   const drag = useRef<{ startY: number; startSnap: number } | null>(null)
   const [dragPx, setDragPx] = useState<number | null>(null)
+
+  const ctx = {
+    raise: () => setSnap((s) => Math.max(s, 1)),
+    collapse: () => setSnap(0),
+  }
+
+  if (mapless) {
+    return (
+      <div className="absolute inset-0 bottom-14 z-10 overflow-y-auto bg-slate-50 p-4 pb-8 md:static md:h-full md:w-[420px] md:shrink-0 md:border-r md:border-slate-200 dark:bg-navy-950 dark:md:border-slate-800">
+        <div className="mx-auto max-w-3xl space-y-4">{children}</div>
+      </div>
+    )
+  }
+
+  if (!isMobile) {
+    return (
+      <div className="h-full w-[420px] shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-navy-950">
+        <div className="space-y-4">{children}</div>
+      </div>
+    )
+  }
 
   const vh = window.innerHeight
   const height = dragPx ?? SNAPS[snap] * vh
@@ -19,7 +47,7 @@ export default function Sheet({ children, mapless }: { children: ReactNode; mapl
   const onPointerMove = (e: React.PointerEvent) => {
     if (!drag.current) return
     const delta = drag.current.startY - e.clientY
-    const h = Math.min(0.92 * vh, Math.max(120, SNAPS[drag.current.startSnap] * vh + delta))
+    const h = Math.min(0.94 * vh, Math.max(110, SNAPS[drag.current.startSnap] * vh + delta))
     setDragPx(h)
   }
   const onPointerUp = () => {
@@ -35,28 +63,18 @@ export default function Sheet({ children, mapless }: { children: ReactNode; mapl
     drag.current = null
   }
 
-  if (mapless) {
-    // Views without map interplay get a plain scrollable surface.
-    return (
-      <div className="absolute inset-0 bottom-14 z-10 overflow-y-auto bg-slate-50 p-4 pb-8 md:static md:h-full md:w-[420px] md:shrink-0 md:border-r md:border-slate-200 dark:bg-navy-950 dark:md:border-slate-800">
-        <div className="mx-auto max-w-3xl space-y-4">{children}</div>
-      </div>
-    )
-  }
-
   return (
-    <>
-      {/* Desktop side panel */}
-      <div className="hidden h-full w-[420px] shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50 p-4 md:block dark:border-slate-800 dark:bg-navy-950">
-        <div className="space-y-4">{children}</div>
-      </div>
-      {/* Mobile bottom sheet */}
+    <SheetCtx.Provider value={ctx}>
       <div
-        className="sheet-enter absolute inset-x-0 bottom-14 z-10 flex flex-col rounded-t-3xl border-t border-slate-200 bg-slate-50/95 backdrop-blur md:hidden dark:border-slate-700 dark:bg-navy-950/95"
-        style={{ height, transition: dragPx == null ? 'height .2s ease-out' : 'none' }}
+        className="absolute inset-x-0 bottom-14 z-10 flex flex-col rounded-t-3xl border-t border-slate-200 bg-slate-50/97 backdrop-blur dark:border-slate-700 dark:bg-navy-950/97"
+        style={{
+          height,
+          transition: dragPx == null ? 'height .22s cubic-bezier(.32,.72,0,1)' : 'none',
+          boxShadow: '0 -6px 24px rgba(0,0,0,0.12)',
+        }}
       >
         <div
-          className="flex shrink-0 cursor-grab touch-none items-center justify-center py-2.5"
+          className="flex shrink-0 cursor-grab touch-none items-center justify-center py-3"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -67,6 +85,6 @@ export default function Sheet({ children, mapless }: { children: ReactNode; mapl
           <div className="space-y-4">{children}</div>
         </div>
       </div>
-    </>
+    </SheetCtx.Provider>
   )
 }

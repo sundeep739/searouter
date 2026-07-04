@@ -226,6 +226,10 @@ def smooth_speed(coords: list[tuple[float, float]], weather: pd.DataFrame, vesse
     # (strong net adverse current can demand more than 1.3x nominal)
     speed_min = min(speed_min, max(3.0, baseline_stw * 0.85))
     speed_max = max(speed_max, baseline_stw * 1.15)
+    # A very slow required average (e.g. a long schedule on a short route) can
+    # push the 3 kn floor above the computed ceiling — keep bounds ordered so
+    # the search doesn't crash on an inverted range.
+    speed_max = max(speed_max, speed_min + 0.5)
 
     baseline_x0 = np.full(n, baseline_stw)  # schedule-feasible constant-speed baseline — reported as-is, never overwritten by the search below
     severity = np.array([s["sig_wave_height_m"] if math.isfinite(s["sig_wave_height_m"]) else 0.0

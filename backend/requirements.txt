@@ -1,6 +1,8 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 pandas>=2.0
+numpy>=1.26
+scipy>=1.11
 searoute>=1.4
 rapidfuzz>=3.0
 PyJWT[crypto]>=2.8

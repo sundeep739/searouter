@@ -1,9 +1,11 @@
 """SeaRouter API — FastAPI wrapper around the sea-distance engine (core.py).
 
-All endpoints except /health require a Supabase JWT. The weather/ package is
-present but dormant until Phase 2.
+All endpoints except /health require a Supabase JWT. Weather-aware planning
+(/weather/plan) reuses the weather/ physics with a light Open-Meteo data layer;
+its heavy deps (scipy) are imported lazily so base memory stays low.
 """
 
+import math
 import os
 from datetime import datetime, timedelta
 
@@ -337,6 +339,190 @@ def verify_batch(req: BatchReq, _=Depends(verify_token)):
                 }
             )
     return {"results": results, "tolerance_pct": req.tolerance_pct}
+
+
+HAZARD_WAVE_M = 4.0
+HAZARD_WIND_MS = 17.0
+
+
+def _num(x, ndigits=2):
+    """JSON-safe number: NaN/inf -> None (invalid JSON otherwise)."""
+    if x is None:
+        return None
+    x = float(x)
+    return None if not math.isfinite(x) else round(x, ndigits)
+
+
+@app.get("/vessels/presets")
+def vessel_presets(_=Depends(verify_token)):
+    from weather.fleet import vessel_to_dict
+    from weather.vessel import PRESETS
+
+    return {"presets": {name: vessel_to_dict(v) for name, v in PRESETS.items()}}
+
+
+class WeatherPlanReq(BaseModel):
+    origin: str
+    dest: str
+    avoid: list[str] = []
+    waypoints: list[list[float]] = []
+    speed: float | None = Field(None, ge=1, le=60)
+    schedule: Schedule | None = None
+    departure: datetime | None = None
+    vessel: dict
+    loading: str = Field("laden", pattern="^(laden|ballast)$")
+    objective: str = Field("steady_power", pattern="^(steady_power|min_fuel)$")
+    interval_hours: float = Field(12, ge=3, le=24)
+
+
+@app.post("/weather/plan")
+def weather_plan(req: WeatherPlanReq, _=Depends(verify_token)):
+    # Heavy weather deps loaded only when this endpoint is hit.
+    from weather.fleet import vessel_from_dict
+    from weather.openmeteo import sample_route
+    from weather.speed_optimizer import MS_PER_KNOT, build_segments, smooth_speed
+
+    restrictions = _restrictions(req.avoid)
+    o_row, _h = _resolve(req.origin, "origin")
+    d_row, _h2 = _resolve(req.dest, "dest")
+    o_pt, d_pt = (o_row["lon"], o_row["lat"]), (d_row["lon"], d_row["lat"])
+
+    if req.waypoints:
+        seq = core.order_waypoints(o_pt, d_pt, [tuple(w) for w in req.waypoints])
+        legs, gap = core.compute_legs(seq, restrictions)
+        if gap is not None:
+            raise HTTPException(422, "No sea route through those waypoints")
+        coords: list = []
+        for leg in legs:
+            coords.extend(leg["coords"])
+    else:
+        variants = core.route_variants(o_pt, d_pt, restrictions)
+        if not variants:
+            raise HTTPException(422, "No sea route exists between these locations")
+        coords = variants[0]["coords"]
+    coords = [(float(c[0]), float(c[1])) for c in coords]
+
+    route_nm = sum(
+        core._haversine_km(coords[i], coords[i + 1]) for i in range(len(coords) - 1)
+    ) * core.NAUTICAL_MILES_PER_KM
+
+    try:
+        vessel = vessel_from_dict(req.vessel)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Invalid vessel spec: {exc}")
+
+    nominal_speed = target_hours = None
+    if req.schedule:
+        target_hours = (req.schedule.eta - req.schedule.etd).total_seconds() / 3600
+        if target_hours <= 0:
+            raise HTTPException(400, "schedule.eta must be after schedule.etd")
+        departure = req.schedule.etd
+        sampling_speed = route_nm / target_hours
+    elif req.speed:
+        nominal_speed = req.speed
+        departure = req.departure or datetime.utcnow()
+        sampling_speed = req.speed
+    else:
+        raise HTTPException(400, "Provide either speed or schedule")
+
+    sub_coords, wx = sample_route(coords, sampling_speed, departure, req.interval_hours)
+    if len(sub_coords) < 2:
+        raise HTTPException(422, "Route too short to build a weather plan")
+
+    segments = build_segments(sub_coords, wx)
+    plan = smooth_speed(
+        sub_coords,
+        wx,
+        vessel,
+        nominal_speed_knots=nominal_speed,
+        target_hours=target_hours,
+        loading=req.loading,
+        objective=req.objective,
+    )
+
+    speeds = plan["segment_speeds_knots"]
+    powers = plan["segment_power_kw"]
+    fuels = plan["segment_fuel_t"]
+    dists = plan["segment_distances_nm"]
+
+    legs_out, max_wave, max_wind, hazard_count = [], 0.0, 0.0, 0
+    for i, seg in enumerate(segments):
+        row = wx.iloc[i]
+        wave = row["gfs_wave__sig_wave_height_m"]
+        wind = row["wind_speed_ms"]
+        hazard = (math.isfinite(wave) and wave > HAZARD_WAVE_M) or (
+            math.isfinite(wind) and wind > HAZARD_WIND_MS
+        )
+        if hazard:
+            hazard_count += 1
+        if math.isfinite(wave):
+            max_wave = max(max_wave, wave)
+        if math.isfinite(wind):
+            max_wind = max(max_wind, wind)
+        stw = speeds[i]
+        current_assist = seg["current_assist_kn"]
+        legs_out.append(
+            {
+                "from": [round(sub_coords[i][0], 4), round(sub_coords[i][1], 4)],
+                "to": [round(sub_coords[i + 1][0], 4), round(sub_coords[i + 1][1], 4)],
+                "eta": row["eta"],
+                "distance_nm": _num(dists[i], 1),
+                "stw_knots": _num(stw, 2),
+                "current_assist_kn": _num(current_assist, 2),
+                "sog_knots": _num(stw + current_assist, 2),
+                "power_kw": _num(powers[i], 0),
+                "fuel_t": _num(fuels[i], 2),
+                "wind_speed_ms": _num(wind, 1),
+                "wave_height_m": _num(wave, 2),
+                "current_speed_ms": _num(row["current_speed_ms"], 2),
+                "hazard": bool(hazard),
+            }
+        )
+
+    sampled = [
+        {
+            "lon": round(float(r["lon"]), 4),
+            "lat": round(float(r["lat"]), 4),
+            "eta": r["eta"],
+            "wind_speed_ms": _num(r["wind_speed_ms"], 1),
+            "wave_height_m": _num(r["gfs_wave__sig_wave_height_m"], 2),
+            "current_speed_ms": _num(r["current_speed_ms"], 2),
+        }
+        for _, r in wx.iterrows()
+    ]
+
+    fb, fo = plan["fuel_baseline_t"], plan["fuel_optimized_t"]
+    saved_pct = ((fb - fo) / fb * 100) if fb else 0.0
+    return {
+        "vessel": vessel.name,
+        "loading": req.loading,
+        "objective": req.objective,
+        "route_nm": _num(route_nm, 1),
+        "sampled_points": len(sampled),
+        "plan": {
+            "success": plan["success"],
+            "message": plan["message"],
+            "nominal_speed_knots": _num(plan["nominal_speed_knots"], 2),
+            "baseline_speed_knots": _num(plan["baseline_speed_knots"], 2),
+            "total_hours_optimized": _num(plan["total_hours_optimized"], 1),
+            "total_hours_baseline": _num(plan["total_hours_baseline"], 1),
+            "fuel_baseline_t": _num(fb, 2),
+            "fuel_optimized_t": _num(fo, 2),
+            "fuel_saved_pct": _num(saved_pct, 1),
+            "power_std_baseline_kw": _num(plan["power_std_baseline"], 0),
+            "power_std_optimized_kw": _num(plan["power_std_optimized"], 0),
+            "sfoc_modeled": plan["sfoc_modeled"],
+        },
+        "hazards": {
+            "count": hazard_count,
+            "max_wave_m": _num(max_wave, 2),
+            "max_wind_ms": _num(max_wind, 1),
+            "wave_threshold_m": HAZARD_WAVE_M,
+            "wind_threshold_ms": HAZARD_WIND_MS,
+        },
+        "legs": legs_out,
+        "sampled": sampled,
+    }
 
 
 class InviteReq(BaseModel):

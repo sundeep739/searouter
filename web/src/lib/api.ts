@@ -150,6 +150,62 @@ export interface BatchResult {
   error?: string
 }
 
+export interface WeatherLeg {
+  from: [number, number]
+  to: [number, number]
+  eta: string
+  distance_nm: number | null
+  stw_knots: number | null
+  current_assist_kn: number | null
+  sog_knots: number | null
+  power_kw: number | null
+  fuel_t: number | null
+  wind_speed_ms: number | null
+  wave_height_m: number | null
+  current_speed_ms: number | null
+  hazard: boolean
+}
+
+export interface WeatherSampled {
+  lon: number
+  lat: number
+  eta: string
+  wind_speed_ms: number | null
+  wave_height_m: number | null
+  current_speed_ms: number | null
+}
+
+export interface WeatherPlanResp {
+  vessel: string
+  loading: string
+  objective: string
+  route_nm: number | null
+  sampled_points: number
+  plan: {
+    success: boolean
+    message: string
+    nominal_speed_knots: number | null
+    baseline_speed_knots: number | null
+    total_hours_optimized: number | null
+    total_hours_baseline: number | null
+    fuel_baseline_t: number | null
+    fuel_optimized_t: number | null
+    fuel_saved_pct: number | null
+    power_std_baseline_kw: number | null
+    power_std_optimized_kw: number | null
+    sfoc_modeled: boolean
+  }
+  hazards: {
+    count: number
+    max_wave_m: number | null
+    max_wind_ms: number | null
+    wave_threshold_m: number
+    wind_threshold_ms: number
+  }
+  legs: WeatherLeg[]
+  sampled: WeatherSampled[]
+}
+
 export const PASSAGES: Record<string, string> = {
   suez: 'Suez Canal',
   panama: 'Panama Canal',

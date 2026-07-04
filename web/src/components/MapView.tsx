@@ -21,11 +21,18 @@ export interface MapMarker {
   label?: string
 }
 
+export interface WeatherPoint {
+  lon: number
+  lat: number
+  wave: number | null
+}
+
 export interface MapLayers {
   routes: RouteLine[]
   markers: MapMarker[]
   polygons: Pt[][]
   draft: Pt[]
+  weatherPoints?: WeatherPoint[]
   /** Changes to this key trigger fitBounds over all route coords. */
   fitKey?: string
 }
@@ -224,6 +231,40 @@ function syncOverlays(m: maplibregl.Map, layers: MapLayers, showSeamap: boolean)
       type: 'circle',
       source: 'draft',
       paint: { 'circle-radius': 4.5, 'circle-color': '#f59e0b', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff' },
+    })
+  }
+
+  // Weather sample points, coloured by significant wave height.
+  const wxFc: GeoJSON = {
+    type: 'FeatureCollection',
+    features: (layers.weatherPoints ?? []).map((w) => ({
+      type: 'Feature',
+      properties: { wave: w.wave ?? 0 },
+      geometry: { type: 'Point', coordinates: [w.lon, w.lat] },
+    })),
+  }
+  ensureGeojson(m, 'weather', wxFc)
+  if (!m.getLayer('weather-pts')) {
+    m.addLayer({
+      id: 'weather-pts',
+      type: 'circle',
+      source: 'weather',
+      paint: {
+        'circle-radius': 6,
+        'circle-stroke-width': 1.5,
+        'circle-stroke-color': '#ffffff',
+        'circle-color': [
+          'interpolate',
+          ['linear'],
+          ['get', 'wave'],
+          0,
+          '#22c55e',
+          2,
+          '#eab308',
+          4,
+          '#ef4444',
+        ],
+      } as never,
     })
   }
 }
