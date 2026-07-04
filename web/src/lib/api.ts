@@ -1,8 +1,19 @@
 import { supabase } from './supabase'
 
-// Defaults to the Render service named in backend/render.yaml. Override with
-// VITE_API_URL for local dev (http://localhost:8000) or a different backend.
-const BASE = import.meta.env.VITE_API_URL ?? 'https://searouter-api.onrender.com'
+// Backend base URL, decided at RUNTIME from the page's own hostname so a
+// deployed site can never accidentally point at a developer's localhost
+// (which is unreachable from anyone else's device). Only when the app is
+// itself served from localhost do we honour a localhost VITE_API_URL.
+const PROD_API = 'https://searouter-api.onrender.com'
+function resolveBase(): string {
+  const envUrl = import.meta.env.VITE_API_URL as string | undefined
+  const servedLocally = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
+  const envIsLocal = !envUrl || /localhost|127\.0\.0\.1/.test(envUrl)
+  if (servedLocally) return envUrl ?? 'http://localhost:8000'
+  // Deployed: use an explicitly-set remote backend, else the Render default.
+  return envIsLocal ? PROD_API : envUrl!
+}
+const BASE = resolveBase()
 
 export class ApiError extends Error {
   status: number

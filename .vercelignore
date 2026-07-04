@@ -1,0 +1,9 @@
+# Never upload local env files — they must not influence the production build.
+.env
+.env.*
+web/.env
+web/.env.*
+!web/.env.example
+backend/.venv
+web/node_modules
+web/dist
