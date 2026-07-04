@@ -14,6 +14,7 @@ export default function Sheet({ children, mapless }: { children: ReactNode; mapl
   const SNAPS = [0.26, 0.6, 0.92]
   const [snap, setSnap] = useState(0)
   const drag = useRef<{ startY: number; startSnap: number } | null>(null)
+  const didDrag = useRef(false)
   const [dragPx, setDragPx] = useState<number | null>(null)
 
   const ctx = {
@@ -42,11 +43,17 @@ export default function Sheet({ children, mapless }: { children: ReactNode; mapl
 
   const onPointerDown = (e: React.PointerEvent) => {
     drag.current = { startY: e.clientY, startSnap: snap }
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    didDrag.current = false
+    try {
+      ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {
+      /* synthetic events have no pointer to capture */
+    }
   }
   const onPointerMove = (e: React.PointerEvent) => {
     if (!drag.current) return
     const delta = drag.current.startY - e.clientY
+    if (Math.abs(delta) > 4) didDrag.current = true
     const h = Math.min(0.94 * vh, Math.max(110, SNAPS[drag.current.startSnap] * vh + delta))
     setDragPx(h)
   }
@@ -62,6 +69,15 @@ export default function Sheet({ children, mapless }: { children: ReactNode; mapl
     setDragPx(null)
     drag.current = null
   }
+  // A tap (mouse or touch fires click too) cycles peek → mid → full, so the
+  // map can be minimised to read details and restored with another tap.
+  const onHandleClick = () => {
+    if (didDrag.current) {
+      didDrag.current = false
+      return
+    }
+    setSnap((s) => (s + 1) % SNAPS.length)
+  }
 
   return (
     <SheetCtx.Provider value={ctx}>
@@ -74,12 +90,16 @@ export default function Sheet({ children, mapless }: { children: ReactNode; mapl
         }}
       >
         <div
-          className="flex shrink-0 cursor-grab touch-none items-center justify-center py-3"
+          className="flex shrink-0 cursor-grab touch-none flex-col items-center justify-center gap-1 py-2.5"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onClick={onHandleClick}
         >
           <div className="h-1.5 w-10 rounded-full bg-slate-300 dark:bg-slate-600" />
+          <span className="text-[10px] leading-none text-slate-400">
+            {snap === SNAPS.length - 1 ? 'tap to shrink' : 'tap to expand'}
+          </span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
           <div className="space-y-4">{children}</div>

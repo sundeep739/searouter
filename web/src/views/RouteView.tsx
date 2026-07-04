@@ -149,7 +149,8 @@ export default function RouteView({ map, active }: { map: MapCtl; active: boolea
           dashed: selected !== -1,
         })
       }
-      layers.fitKey = `${result.origin.unlocode}-${result.dest.unlocode}-${result.variants[0].distance_nm}`
+      // include `selected` so choosing a different variant re-frames the map
+      layers.fitKey = `${result.origin.unlocode}-${result.dest.unlocode}-${result.variants[0].distance_nm}-${selected}`
     }
     if (weatherPoints) layers.weatherPoints = weatherPoints
     map.setLayers(layers)
@@ -451,16 +452,16 @@ export default function RouteView({ map, active }: { map: MapCtl; active: boolea
     <>
       <button
         onClick={() => setSearchOpen(true)}
-        className="fixed left-3 right-16 z-30 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-3.5 py-2.5 text-left shadow-lg backdrop-blur dark:border-slate-600 dark:bg-navy-900/95"
+        className="fixed left-3 z-30 inline-flex max-w-[calc(100%-5rem)] items-center gap-2 rounded-full border border-slate-200 bg-white/95 py-2 pl-3.5 pr-4 text-left shadow-lg backdrop-blur dark:border-slate-600 dark:bg-navy-900/95"
         style={{ top: 'max(12px, env(safe-area-inset-top))' }}
       >
         <span className="text-slate-400">⌕</span>
         {origin && dest ? (
-          <span className="flex-1 truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+          <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
             {origin.name} <span className="text-slate-400">→</span> {dest.name}
           </span>
         ) : (
-          <span className="flex-1 truncate text-sm text-slate-400">Set origin and destination</span>
+          <span className="truncate text-sm text-slate-500 dark:text-slate-400">Search route</span>
         )}
       </button>
 

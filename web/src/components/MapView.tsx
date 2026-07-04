@@ -96,14 +96,30 @@ export default function MapView({ layers, showSeamap, clickMode, onMapClick }: P
       syncMarkers(m, markers.current, layers.markers)
       if (layers.fitKey && layers.fitKey !== lastFit.current) {
         lastFit.current = layers.fitKey
-        const pts = layers.routes.flatMap((r) => unwrap(r.coords))
+        // Frame the highlighted (widest) route so selecting an alternate
+        // re-centres the map on it — otherwise a route through an area hidden
+        // behind the mobile sheet looks like "nothing changed".
+        const primary = [...layers.routes].sort((a, b) => b.width - a.width)[0]
+        const source = primary ? [primary] : layers.routes
+        const pts = source.flatMap((r) => unwrap(r.coords))
         layers.markers.forEach((mk) => pts.push([mk.lon, mk.lat]))
         if (pts.length > 1) {
           const b = pts.reduce(
             (acc, p) => acc.extend(p as [number, number]),
             new maplibregl.LngLatBounds(pts[0] as [number, number], pts[0] as [number, number]),
           )
-          m.fitBounds(b, { padding: { top: 90, bottom: 60, left: 40, right: 40 }, maxZoom: 9 })
+          // On phones the bottom sheet covers the lower part of the map, so
+          // pad the framing up into the visible strip.
+          const mobile = window.innerWidth < 768
+          m.fitBounds(b, {
+            padding: {
+              top: mobile ? 80 : 90,
+              bottom: mobile ? Math.round(window.innerHeight * 0.32) : 60,
+              left: 40,
+              right: 40,
+            },
+            maxZoom: 9,
+          })
         }
       }
     }
