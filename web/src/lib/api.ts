@@ -1,6 +1,8 @@
 import { supabase } from './supabase'
 
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+// Defaults to the Render service named in backend/render.yaml. Override with
+// VITE_API_URL for local dev (http://localhost:8000) or a different backend.
+const BASE = import.meta.env.VITE_API_URL ?? 'https://searouter-api.onrender.com'
 
 export class ApiError extends Error {
   status: number
